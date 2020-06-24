@@ -1,0 +1,329 @@
+---
+title: "rugby league"
+output: html_notebook
+---
+
+## packages
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(ggrepel)
+source("functions.R")
+```
+
+
+## priors
+
+use 2019 data (update "games")
+
+fix up 2019 league 1
+
+```{r}
+games=readRDS("~/Documents/flashscore/games.rds")
+# View(games)
+```
+
+```{r}
+games %>% filter(comp==201901) -> games
+# View(games)
+```
+
+
+```{r}
+lnos=201901
+(games %>% comp_games(lnos) -> gg)
+(gg %>% team_lookup_table() -> lookup_table)
+```
+
+```{r}
+make_stan(games,lookup_table)
+```
+
+
+```{r}
+games %>% 
+  make_stan_prior(lnos,"rl201903.csv") 
+beepr::beep(3)
+```
+
+go back and read in the original games
+
+```{r}
+games=readRDS("~/Documents/flashscore/games.rds")
+(games %>% comp_games(202003)
+  %>% team_lookup_table() -> lt1)
+(games %>% comp_games(201903) %>% team_lookup_table() -> lt2)
+lt2 %>% anti_join(lt1,by="team") # removed from
+lt1 %>% anti_join(lt2,by="team") # added to
+
+```
+
+make this year's prior
+
+now edit last year's ratings to be this year's prior, removing the promoted and relegated teams, and replacing them with the ones that went down and up last year.
+
+having replaced up and down names with u and d:
+
+```{r}
+prior_name="rl202003_prior.csv"
+pr=read_csv(prior_name)
+pr %>% filter(str_length(team)==1) %>% 
+  group_by(team) %>% 
+  summarize(m=mean(o+d)/2)
+```
+
+## posterior
+
+read games
+
+```{r}
+games=readRDS("~/Documents/flashscore/games.rds")
+games
+```
+
+
+### get names of everything (change league number)
+
+```{r}
+lnos=202003
+country="rl"
+country_lower="rl"
+prior_year=lnos # change only for Sweden/Nordic at end of year
+priorname=str_c(country_lower,lnos,"_prior.csv")
+prepostname=str_c(country_lower,lnos,"_pre_post.rds")
+postname=str_c(country_lower,lnos,"_post.rds")
+prior=get_prior(priorname)
+pre_post=readRDS(postname) # comment out these lines for a first time rating (ideally I want to use prior as pre_post)
+saveRDS(pre_post, prepostname) # this one too
+```
+
+
+make posterior
+
+```{r}
+post=make_posterior(prior,lnos)
+# display(post,prior) %>% ggplot(aes(x=diff,y=sum, label=team))+geom_point()+geom_text_repel()+xlab("Openness")+ylab("Quality")
+saveRDS(post,postname)
+```
+
+```{r}
+post
+```
+
+
+```{r}
+display(post, prior) %>% View("posterior")
+```
+
+changes (needs, um, changing. Think about priors and if I have anything like sw_id and if it matters.)
+
+```{r}
+df1=post_df(prior,post)
+df0=post_df(prior,pre_post)
+df1 %>% left_join(df0, by=c("team"="team")) %>% 
+  mutate(sum.x=sum.x-mean(sum.x),
+         sum.y=sum.y-mean(sum.y)) %>% 
+  mutate(delta_sum=sum.x-sum.y,
+         delta_diff=diff.x-diff.y) %>% 
+  mutate(pr_sum=percent_rank(sum.x),
+         pr_diff=percent_rank(diff.x)) %>% 
+  select(team, pr_sum, pr_diff, delta_sum, delta_diff) -> z
+z %>% arrange(desc(abs(delta_diff)))
+z %>% arrange(desc(abs(delta_sum)))
+```
+
+### graph (old)
+
+```{r, fig.width=8, fig.height=8}
+display(post, prior) %>% ggplot(aes(x=diff,y=sum, label=team))+geom_point()+geom_text_repel()+xlab("Openness")+ylab("Quality")+ggtitle(str_to_title(lnos))
+```
+
+
+take a look at post (for just looking, use pre-post)
+
+```{r}
+post_df(prior, pre_post)
+```
+
+## previous predictions alongside actual game results
+
+
+```{r}
+p_names=list.files("~/Documents/ratings","preds.*.rds")
+enframe(p_names) %>% arrange(desc(value))
+```
+
+```{r}
+which=32
+pred_file=p_names[which]
+preds=readRDS(pred_file)
+preds %>% mutate(key=str_c(date, home_team, away_team, sep=" ")) -> preds
+```
+
+```{r}
+games_2=readRDS("~/Documents/flashscore/games_2.rds")
+games_2
+games_2 %>% mutate(key=str_c(date, t1_name, t2_name, sep=" ")) -> games_2
+preds %>% left_join(games_2, by="key") %>% select(date=date.x, name, home_team, prediction, score, away_team) %>% drop_na() %>% View("predictions-actual")
+```
+
+## post?
+
+```{r}
+prior
+post=pre_post
+m=extract(post)
+m$o
+m$d
+m$h
+r=with(m, data.frame(o=o,d=d,h=h))
+r
+```
+
+```{r}
+t1=7
+t2=10
+no1=str_c("o.", t1)
+no2=str_c("o.", t2)
+nd1=str_c("d.", t1)
+nd2=str_c("d.", t2)
+no1
+nd2
+```
+
+```{r}
+n=nrow(r)
+r %>% select(o1=no1, o2=no2, d1=nd1, d2=nd2, h) %>% 
+  mutate(l1=exp(o1-d2+h), l2=exp(o2-d1)) %>% 
+  mutate(s1=rpois(n,l1), s2=rpois(n,l2)) %>% 
+  select(s1, s2) -> sim
+sim %>% count(s1, s2) -> counts
+ggplot(counts, aes(x=2*s1, y=2*s2, fill=n)) + geom_tile() + geom_abline(slope=1, intercept=0)
+sim %>% 
+  mutate(result=case_when(s1>s2 ~ "W",
+                          s1<s2 ~ "L", 
+                          TRUE  ~ "D")) %>% 
+  count(result) %>% 
+  mutate(proportion=n/sum(n))
+counts %>% arrange(desc(n)) %>% mutate(s1=2*s1, s2=2*s2)
+sim %>% mutate_all(~2*.) %>% 
+  summarize_all(~median(.))
+```
+
+```{r}
+sim %>% gather(team, score, everything()) %>% 
+  ggplot(aes(x=2*score))+geom_bar(bins=20)+facet_grid(team~.)
+```
+
+
+make a function out of some of this
+
+## fixtures and predictions
+
+so I have fixtures:
+
+```{r}
+fixtures=readRDS("~/Documents/flashscore/fixtures.rds")
+fixtures 
+```
+
+this needs fixing up (the function), possibly because post_df needs work (or the output from it does)
+
+```{r}
+pred_league=function(lnos, fixtures) {
+  print(lnos)
+  country_lower="rl"
+  priorname=str_c(country_lower,lnos,"_prior.csv")
+  postname=str_c(country_lower,lnos,"_post.rds")
+  prior=get_prior(priorname)
+  post=readRDS(postname)
+  post_df(prior,post) %>% select(team, o, d) -> r
+  return(post_df(prior, post))
+  fixtures %>% filter(comp==lnos) %>% select(date, t1_name, t2_name) -> f
+  f %>% left_join(r, by=c("t1_name"="name")) %>% 
+  left_join(r, by=c("t2_name"="name")) %>% 
+  mutate(hs=2*round(exp(o.x-d.y),0),
+         as=2*round(exp(o.y-d.x),0),
+         prediction=str_c(hs, " - ", as)) %>% 
+  select(date, home_team=t1_name, prediction, away_team=t2_name) 
+}
+```
+
+testing
+
+```{r}
+pred_league(201901, fixtures)
+```
+
+
+or,  grab posterior distribution and simulate (maybe make heat map)
+
+make all the leagues
+
+```{r}
+leagues <- tribble(
+  ~name, ~lno,
+  "Super League", 201901,
+  "Championship", 201902,
+  "League 1", 201903,
+  "NRL", 201911
+)
+```
+
+```{r}
+leagues %>% mutate(preds=map(lno, ~pred_league(., fixtures))) %>% 
+  unnest() %>% arrange(date) -> preds
+today=Sys.Date()
+saveRDS(preds, str_c("preds.",today,".rds"))
+```
+
+old predictions
+
+```{r}
+list.files("~/Documents/ratings","preds.*.rds")
+```
+
+```{r}
+fname="preds.2019-09-01.rds"
+preds=readRDS(fname)
+preds %>% mutate(key=str_c(home_team, away_team, date)) -> preds
+preds 
+```
+
+## with actual?
+
+```{r}
+games=readRDS("~/Documents/flashscore/games_2.rds")
+games %>% mutate(key=str_c(t1_name, t2_name, date)) -> games
+preds %>% 
+  left_join(games, by="key") %>% 
+  select(date=date.x,home_team, away_team, prediction, score) %>% 
+  View("rugby league prediction-actual")
+```
+
+### debugging
+
+```{r}
+league_number=201902
+  games %>% filter(comp %in% league_number) -> current_games
+  current_games %>% 
+    filter(str_detect(score," - ")) %>% 
+    separate(score,c("s1","s2"),sep=" - ",convert=T) %>% 
+    select(t1_name,t2_name,s1,s2) -> gg
+  if (nrow(gg)==0) { # no games yet
+    # pull off first row from current_games and fill in 2-1 score for it
+    current_games %>% slice(1) %>% 
+      mutate(s1=2, s2=1) %>% 
+      select(t1_name,t2_name,s1,s2) ->
+      gg
+  }
+  # the below should squeal if I got any team names wrong in prior
+  gg %>% left_join(prior,by=c("t1_name"="team")) %>% 
+    left_join(prior,by=c("t2_name"="team")) %>%
+    select(t1=id.x,t2=id.y,s1,s2) ->
+    post_stan
+  gg
+post_stan
+```
+

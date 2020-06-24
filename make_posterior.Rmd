@@ -1,0 +1,493 @@
+---
+title: "Make posterior"
+output: html_notebook
+---
+
+## startup
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(ggrepel)
+source("functions.R")
+```
+
+## get league info
+
+## get games and league IDs
+
+```{r}
+games=readRDS("~/teaching/scoresway/rds/games.rds")
+league_ids=readRDS("league_ids.rds")
+league_ids
+```
+
+get country
+
+```{r}
+league_ids %>% arrange(the_country) %>% mutate(row=row_number()) %>% select(the_country, row, id) -> li
+# View(li,"The leagues")
+```
+
+## enter number of desired country below
+
+```{r league-no}
+cno=31
+prior_year=2020
+li %>% slice(cno) -> v
+v %>% unnest(id)
+v %>% pull(id) %>% .[[1]] -> lnos
+v %>% pull(the_country) -> country
+v %>% pull(id) %>% .[[1]] -> id
+iterations=10000
+```
+
+
+compare what we have to schedule
+
+```{r}
+lnos
+games %>% filter(comp %in% lnos) %>% 
+  arrange(desc(time_stamp)) %>% View("sched")
+```
+
+
+
+
+
+## make posterior
+
+Change year if needed, then run whole chunk
+
+### ```{r, echo=T, message=F, warning=F, results="hide"}
+```{r} 
+country_lower=tolower(country)
+# prior_year=2019 # change only for Sweden/Nordic at end of year or for winter seasons during summer. Used several times below.
+# prior_year=2019 # change only for Sweden/Nordic at end of year or for winter seasons during summer. Used several times below.
+priorname=str_c(country_lower,prior_year,"_prior.csv")
+prepostname=str_c(country_lower,"_pre_post.rds")
+postname=str_c(country_lower,"_post.rds")
+postname
+prior=get_prior(priorname)
+pre_post=readRDS(postname) # comment out these lines for a first time rating (ideally I want to use prior as pre_post)
+saveRDS(pre_post, prepostname) # this one too
+post=make_posterior_2(prior,lnos,iterations=iterations)
+# post
+# display(post,prior) %>% ggplot(aes(x=diff,y=sum, label=team))+geom_point()+geom_text_repel()+xlab("Openness")+ylab("Quality")
+saveRDS(post,postname)
+beepr::beep(2)
+```
+
+
+
+
+
+## display results
+
+```{r}
+prior %>% select(stan_id=id, sw_id) -> tab1
+# tab1
+tab2 <- name_lookup_table(games, lnos) # does this work for regular leagues?
+# tab2 # I ignore the stan_id column because we are getting stan IDs from prior
+tab1 %>% left_join(tab2, by="sw_id") %>% 
+  select(stan_id=stan_id.x, name) -> name_table
+# post
+disp_old <- display_2(pre_post, name_table)
+disp <- display_2(post, name_table)
+disp %>% left_join(disp_old, by="name") %>% 
+  mutate(new_rank=rank(desc(sum.x)),
+         old_rank=rank(desc(sum.y)),
+         change=old_rank-new_rank,
+         delta=sum.x-sum.y,
+         flag=case_when(
+           abs(delta)>0.12 ~ "***",
+           abs(delta)>0.08 ~ "**",
+           abs(delta)>0.04 ~ "*",
+           TRUE ~ ""
+         )
+         ) %>% 
+        
+  select(new_rank, old_rank, change, name, attack=o.x, defence=d.x, home=h.x, sum=sum.x, old_sum=sum.y, delta, flag) %>% 
+  arrange(new_rank) -> display_update
+
+games %>%  filter(comp %in% id) %>% filter(str_detect(score, " - ")) %>% 
+  mutate(iso_week=iso_week_half(time_stamp)) %>% 
+  filter(iso_week==max(iso_week)) %>% 
+  select(t1, t2, score, time_stamp) %>% 
+  separate(score, into=c("s1", "s2"), remove=F) %>% 
+  mutate(score_rev=str_c(s2, s1, sep=" - ")) %>% 
+  select(-s1, -s2) -> results
+results %>% select(team=t1, opp=t2, score=score, time_stamp) %>% 
+  mutate(venue="h") -> r1
+results %>% select(team=t2, opp=t1, score=score_rev, time_stamp) %>% 
+  mutate(venue="a") -> r2
+bind_rows(r1, r2) -> ar
+ar %>% left_join(tab2, by=c("team"="sw_id")) %>% 
+  left_join(tab2, by=c("opp"="sw_id")) %>% 
+  select(t1_name=name.x, t2_name=name.y, score, venue, time_stamp) -> all_results
+
+display_update %>% 
+  mutate_at(5:10, ~round(., 2)) %>% 
+  left_join(all_results, by=c("name"="t1_name")) %>% 
+  rename(opponent=t2_name) %>% View("new ratings")
+```
+
+
+```{r}
+display_update
+```
+
+## graph (old)
+
+```{r}
+# namelc="ireland"
+namelc=tolower(country)
+display_2(post, name_table) %>% ggplot(aes(x=diff, y=sum, label=name))+geom_point()+geom_text_repel()+xlab("Openness")+ylab("Quality")+ggtitle(str_to_title(namelc))
+```
+
+```{r}
+display_2(post, name_table)
+```
+
+
+## graph (2019-02-15) (needs fixing) name vs team probably
+
+
+```{r}
+graph_it(prior, pre_post, post) +  coord_fixed() + coord_flip()
+```
+
+
+
+
+
+
+## graph (old)
+
+```{r}
+# namelc="ireland"
+namelc=tolower(country)
+prior_year=2019
+priorname=str_c(namelc, prior_year, "_prior.csv")
+priorname
+prior=get_prior(priorname)
+postname=str_c(namelc, "_post.rds")
+# prepostname=str_c(namelc, "_pre_post.rds")
+post=readRDS(postname)
+# pre_post=readRDS(prepostname)
+display
+display(post, prior) %>% ggplot(aes(x=diff,y=sum, label=team))+geom_point()+geom_text_repel()+xlab("Openness")+ylab("Quality")+ggtitle(str_to_title(namelc))
+```
+
+diagnose problems if any
+
+```{r}
+  games %>% filter(comp %in% lnos) -> current_games
+  current_games %>% 
+    filter(str_detect(score," - ")) %>% 
+    separate(score,c("s1","s2"),sep=" - ",convert=T) %>% 
+    select(t1_name,t2_name,s1,s2) -> gg
+gg
+```
+
+
+
+## junk
+
+## get leagues (probably not needed any more)
+
+for given country and find division and season we want 
+(type country name in.)
+`nt` is date of *first* match of season.
+
+run one line at a time
+
+```{r}
+country="Iceland"
+(games %>% country_to_leagues(country) -> ll)
+league_name=ll[6]
+country_to_league_number(games,country,league_name)
+lnos=47479
+```
+
+making a graph with pre-post and post
+
+function to make df of posts
+
+```{r}
+post_df=function(prior,post_thing) {
+  rat=extract(post_thing)
+  tibble(id=1:nrow(prior),
+         o=apply(rat$o,2,mean),
+         d=apply(rat$d,2,mean),
+         h=mean(rat$h)) %>% 
+    left_join(prior,by=c("id")) %>% 
+    select(team,id,o=o.x,d=d.x) %>% 
+    mutate(sum=o+d,diff=o-d) %>% 
+    arrange(desc(sum))
+}
+```
+
+use this to make graph
+
+```{r}
+graph_it=function(prior, pre_post, post) {
+  df1=post_df(prior, post)
+  df0=post_df(prior, pre_post)
+  bind_rows(df1, df0, .id="which") -> d # 1 is new, 2 is old
+  d %>% group_by(which) %>% summarize(mm=mean(sum)) -> means
+  d %>% left_join(means) %>% # look up right mean for "which"
+    mutate(sum=sum-mm) %>% 
+    mutate(which=ifelse(which==1, "now", "previous")) %>% 
+    mutate(mylab=ifelse(which=="now", team, "")) -> d2
+  ggplot(d2,aes(x=diff,y=sum,colour=which,label=mylab))+
+    geom_point()+
+    geom_path(aes(group=team),colour="blue", arrow=arrow(type="closed", ends="last", length=unit(0.1, "inches")))+
+    geom_text_repel(colour="black")  
+}
+```
+
+```{r}
+graph_it(prior, pre_post, post)
+```
+
+
+playing
+
+test it
+
+```{r}
+df1=post_df(prior, post)
+df0=post_df(prior, pre_post)
+bind_rows(df1, df0, .id="which") -> d # 1 is new, 2 is old
+d
+```
+
+graph (based on Procrustes plot from D29)
+
+```{r}
+ ggplot(d,aes(x=diff,y=sum,colour=which,
+                      label=team))+geom_point()+
+    geom_line(aes(group=team),colour="green")+
+    geom_text_repel()
+```
+
+need to standardize sums to have mean zero, and to not print name by previous. 
+
+```{r}
+d
+(d %>% group_by(which) %>% summarize(mm=mean(sum)) -> means)
+```
+
+```{r}
+(d %>% left_join(means) %>% mutate(sum=sum-mm) %>% 
+   mutate(which=ifelse(which==1, "present", "past")) %>% 
+   mutate(mylab=ifelse(which=="present", team, "")) -> d2)
+```
+
+graph take 2
+
+```{r}
+ ggplot(d2,aes(x=diff,y=sum,colour=which,
+                      label=mylab))+geom_point()+
+    geom_path(aes(group=team),colour="blue", arrow=arrow(type="closed", ends="first", length=unit(0.1, "inches")))+
+    geom_text_repel(colour="black")
+```
+
+
+
+reference
+
+
+```{r}
+display=function(post,pre_post,prior) {
+  rat=extract(post)
+  tibble(id=1:nrow(prior),
+         o=apply(rat$o,2,mean),
+         d=apply(rat$d,2,mean),
+         h=mean(rat$h)
+  ) %>% 
+    left_join(prior,by=c("id")) %>% 
+    select(team,id,o=o.x,d=d.x) %>% 
+    mutate(sum=o+d,diff=o-d) %>% 
+    arrange(desc(sum))
+}
+```
+
+### europe here
+
+```{r}
+country="europe"
+iterations=1000
+prior_year=2020
+euro_leagues=tribble(
+~league, ~y2020, ~y2019,
+"euc", 54137, 48405,
+"prsf", 54145, 48814,
+"prf", 54144, 48968,
+"2qr", 54138, 48406,
+"3qr", 54139, 48407,
+"po", 54143, 48411,
+"gs", 54142, 48410, 
+"8f", -1, 48408,
+"qf", -1, 48412,
+"sf", -1, 48413,
+"f", -1, 48409,
+"eue", 54012, 48815,
+"1qr", 54005, 48744,
+"2qr", 54006, 48745,
+"3qr", 54007, 48746,
+"po", 54011, 48750,
+"gs", 54010, 48749,
+"16f", -1, 48743,
+"8f", -1, 48747,
+"qf", -1, 48751,
+"sf", -1, 48752,
+"f", -1, 48748,
+"albania", 54441, 48259,
+"andorra", 53266, 47723,
+"do", 53265, 47722, 
+"armenia", 54074, 48391,
+"do", 54897, -1,
+"austria", 54164, 48232,
+"do", 54161, 48721,
+"azerbaijan", 53041, 47907,
+"belarus", 51126, 45312,
+"belgium", 53516, 48492,
+"do", 53515, 48491,
+"bosnia-herzegovina", 53769, 48238,
+"bulgaria", 54087, 48506,
+"do", 54083, 48502,
+"croatia", 53842, 48337,
+"cyprus", 53274, 47751,
+"do 2", 53273, 47750,
+"Czech rep", 54509, 48236,
+"do", 54505, 48725,
+"denmark", 54285, 48497,
+"do", 54281, 48493,
+"england", 53145, 48730,
+"estonia", 50619, 44926,
+"faroe is", 50678, 44303,
+"finland", 51457, 44726,
+"france", 53638, 48044,
+"georgia", 51162, 45330, 
+"germany", 53499, 47657,
+"gibraltar", 53435, 48922,
+"do", 55353, -1, 
+"greece", 52837, 47479,
+"do 2", 53558, -1, 
+"hungary", 53519, 48855,
+"iceland", 50336, 44141,
+"israel", 53556, 48018,
+"italy", 54890, 48235,
+"kazakhstan", 50618, 44925,
+"kosovo", 53364, 48248,
+"latvia", 50609, 44854,
+"liechtenstein", 52832, 47474,
+"ditto 2", 52833, 47475,
+"ditto 3", 52834, 47477,
+"ditto 4", 52835, 47478,
+"ditto 5", 52836, 47476,
+"lithuania", 50746, 45171,
+"do 2", 50745, 45170,
+"luxembourg", 53290, 48021,
+"malta", 52902, 47326,
+"moldova", 50991, 45337,
+"montenegro", 53867, 48414,
+"netherlands", 54058, 47971,
+"north macedonia", 53864, 48390,
+"northern ireland", 53081, 47720,
+"do", 53078, 47717,
+"norway", 50939, 45310, 
+"poland", 53505, 48402,
+"do 2", 53504, 48401,
+"portugal", 53517, 47741,
+"rep ireland", 50855, 45768,
+"romania", 54245, 48876,
+"do 2", 54244, 48875,
+"russia", 53628, 47835,
+"san marino", 54124, 49261,
+"do 2", -1, 49257,
+"do 4", -1, 49253,
+"do 5", -1, 49254,
+"do 6", -1, 49252,
+"scotland", 53513, 47730,
+"do 2", 53514, 47731,
+"serbia", 53321, 48023,
+"do", 53320, 48022,
+"slovakia", 53771, 48246,
+"do", 53770, 48243,
+"slovenia", 53678, 48127,
+"spain", 53502, 47983,
+"sweden", 50679, 44851,
+"switzerland", 54327, 48769,
+"turkey", 53866, 48404,
+"ukraine", 54067, 47821, 
+"ditto 2", 54066, 47820,
+"wales", 53473, 48196,
+"ditto 2", 53474, 48197
+)
+```
+
+```{r}
+euro_leagues %>% filter(y2020>0) %>% 
+  pull(y2020) -> lnos
+lnos
+```
+
+
+### facup and leagues (do I need to fill out levels 6, 7 and 8?)
+
+```{r}
+country="facup"
+iterations=1000
+prior_year=2020
+facup_leagues=tribble(
+  ~league, ~y2020, ~y2019, ~y2018,
+  "p", 53384, 48359, 42260,
+  "pr", 53385, 48360, 42261,
+  "q1", 53366, 48339, 42240,
+  "q1r", 53367, 48340, 42241,
+  "q2", 53370, 48343, 42244,
+  "q2r", 53371, 48344, 42245,
+  "q3", 53374, 48347, 42248,
+  "q3r", 53375, 48348, 42249,
+  "q4", 53378, 48351, 42252,
+  "q4r", 53379, 48352, 42253,
+  "r1", 53365, 48338, 42239,
+  "r1r", 53368, 48341, 42242,
+  "r2", 53369, 48342, 42243,
+  "r2r", 53372, 48345, 42246,
+  "r3", 53373, 48346, 42247,
+  "r3r", 53376, 48349, 42250,
+  "r4", 53377, 48350, 42251,
+  "r4r", 53380, 48353, 42254,
+  "r5", 53381, 48354, 42255,
+  "r5r", -1, -1, 42256,
+  "r6", -1, 48361, 42262,
+  "sf", -1, 48362, 42263,
+  "f", -1, 48358, 42259,
+  "l1", 53145, 48730, 41547,
+  "l2", 53782, 48274, 42070,
+  "l3", 53677, 48115, 41820,
+  "l4", 53874, 48450, 42073,
+  "l5", 53131, 48734, 41651,
+  "l6a", 53161, 47691, 41337,
+  "l6b", 53165, 47695, 41340,
+  "l7a", 53153, 47526, 40941, 
+  "l7b", 53150, 47523, 40938,
+)
+```
+
+
+
+
+
+
+
+
+grab the ones to make posterior out of
+
+```{r}
+facup_leagues %>% filter(y2020>0) %>% pull(y2020) -> lnos
+```

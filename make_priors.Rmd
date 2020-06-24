@@ -1,0 +1,312 @@
+---
+title: "make priors"
+output: html_notebook
+---
+
+last season's ratings to use as priors
+
+add thoughts for others here: n/n
+
+## packages
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(conflicted)
+conflict_prefer("filter", "dplyr")
+conflict_prefer("extract", "rstan")
+```
+ 
+## functions
+
+```{r}
+source("functions.R")
+```
+
+
+
+## get games
+
+```{r}
+games=readRDS("~/teaching/scoresway/rds/games.rds")
+```
+
+
+
+## euro leagues ob
+
+```{r}
+euro_leagues=tribble(
+~league, ~y2020, ~y2019,
+"euc", 54137, 48405,
+"prsf", 54145, 48814,
+"prf", 54144, 48968,
+"2qr", 54138, 48406,
+"3qr", 54139, 48407,
+"po", 54143, 48411,
+"gs", 54142, 48410, 
+"8f", -1, 48408,
+"qf", -1, 48412,
+"sf", -1, 48413,
+"f", -1, 48409,
+"eue", 54012, 48815,
+"1qr", 54005, 48744,
+"2qr", 54006, 48745,
+"3qr", 54007, 48746,
+"po", 54011, 48750,
+"gs", 54010, 48749,
+"16f", -1, 48743,
+"8f", -1, 48747,
+"qf", -1, 48751,
+"sf", -1, 48752,
+"f", -1, 48748,
+"albania", 54441, 48259,
+"andorra", 53266, 47723,
+"do", 53265, 47722, 
+"armenia", 54074, 48391,
+"do", 54897, -1,
+"austria", 54164, 48232,
+"do", 54161, 48721,
+"azerbaijan", 53041, 47907,
+"belarus", 51126, 45312,
+"belgium", 53516, 48492,
+"do", 53515, 48491,
+"bosnia-herzegovina", 53769, 48238,
+"bulgaria", 54087, 48506,
+"do", 54083, 48502,
+"croatia", 53842, 48337,
+"cyprus", 53274, 47751,
+"do 2", 53273, 47750,
+"Czech rep", 54509, 48236,
+"do", 54505, 48725,
+"denmark", 54285, 48497,
+"do", 54281, 48493,
+"england", 53145, 48730,
+"estonia", 50619, 44926,
+"faroe is", 50678, 44303,
+"finland", 51457, 44726,
+"france", 53638, 48044,
+"georgia", 51162, 45330, 
+"germany", 53499, 47657,
+"gibraltar", 53435, 48922,
+"do", 55353, -1, 
+"greece", 52837, 47479,
+"do 2", 53558, -1, 
+"hungary", 53519, 48855,
+"iceland", 50336, 44141,
+"israel", 53556, 48018,
+"italy", 54890, 48235,
+"kazakhstan", 50618, 44925,
+"kosovo", 53364, 48248,
+"latvia", 50609, 44854,
+"liechtenstein", 52832, 47474,
+"ditto 2", 52833, 47475,
+"ditto 3", 52834, 47477,
+"ditto 4", 52835, 47478,
+"ditto 5", 52836, 47476,
+"lithuania", 50746, 45171,
+"do 2", 50745, 45170,
+"luxembourg", 53290, 48021,
+"malta", 52902, 47326,
+"moldova", 50991, 45337,
+"montenegro", 53867, 48414,
+"netherlands", 54058, 47971,
+"north macedonia", 53864, 48390,
+"northern ireland", 53081, 47720,
+"do", 53078, 47717,
+"norway", 50939, 45310, 
+"poland", 53505, 48402,
+"do 2", 53504, 48401,
+"portugal", 53517, 47741,
+"rep ireland", 56312, 50855, 
+"romania", 54245, 48876,
+"do 2", 54244, 48875,
+"russia", 53628, 47835,
+"san marino", 54124, 49261,
+"do 2", -1, 49257,
+"do 4", -1, 49253,
+"do 5", -1, 49254,
+"do 6", -1, 49252,
+"scotland", 53513, 47730,
+"do 2", 53514, 47731,
+"serbia", 53321, 48023,
+"do", 53320, 48022,
+"slovakia", 53771, 48246,
+"do", 53770, 48243,
+"slovenia", 53678, 48127,
+"spain", 53502, 47983,
+"sweden", 56336, 50679,
+"switzerland", 54327, 48769,
+"turkey", 53866, 48404,
+"ukraine", 54067, 47821, 
+"ditto 2", 54066, 47820,
+"wales", 53473, 48196,
+"ditto 2", 53474, 48197
+)
+```
+
+```{r}
+euro_leagues %>% filter(y2020>0) %>% 
+  pull(y2020) -> lnos_new
+euro_leagues %>% filter(y2019>0) %>% 
+  pull(y2019) -> lnos
+lnos
+```
+
+
+## facup and leagues
+
+```{r}
+facup_leagues=tribble(
+  ~league, ~y2020, ~y2019, ~y2018,
+  "p", 53384, 48359, 42260,
+  "pr", 53385, 48360, 42261,
+  "q1", 53366, 48339, 42240,
+  "q1r", 53367, 48340, 42241,
+  "q2", 53370, 48343, 42244,
+  "q2r", 53371, 48344, 42245,
+  "q3", 53374, 48347, 42248,
+  "q3r", 53375, 48348, 42249,
+  "q4", 53378, 48351, 42252,
+  "q4r", 53379, 48352, 42253,
+  "r1", 53365, 48338, 42239,
+  "r1r", 53368, 48341, 42242,
+  "r2", 53369, 48342, 42243,
+  "r2r", 53372, 48345, 42246,
+  "r3", 53373, 48346, 42247,
+  "r3r", 53376, 48349, 42250,
+  "r4", 53377, 48350, 42251,
+  "r4r", 53380, 48353, 42254,
+  "r5", 53381, 48354, 42255,
+  "r5r", -1, -1, 42256,
+  "r6", -1, 48361, 42262,
+  "sf", -1, 48362, 42263,
+  "f", -1, 48358, 42259,
+  "l1", 53145, 48730, 41547,
+  "l2", 53782, 48274, 42070,
+  "l3", 53677, 48115, 41820,
+  "l4", 53874, 48450, 42073,
+  "l5", 53131, 48734, 41651,
+  "l6a", 53161, 47691, 41337,
+  "l6b", 53165, 47695, 41340,
+  "l7a", 53153, 47526, 40941, 
+  "l7b", 53150, 47523, 40938,
+  "l7c", 53157, 49437, 40944,
+  "l7d", 53160, 47529, -1,
+  "l8a", 52966, 47535, 40947, 
+  "l8b", 52967, 47534, 40948,
+  "l8c", 52968, 47539, 40949,
+  "l8d", 52970, 47538, 40950,
+  "l8e", 52969, 47532, 40953,
+  "l8f", 52973, 47533, 40954,
+  "l8g", 52974, 49438, -1,
+)
+saveRDS(facup_leagues, "facup_leagues.rds")
+```
+
+grab the ones to make posterior out of
+
+```{r}
+facup_leagues %>% filter(y2020>0) %>% pull(y2020) -> lnos_new
+```
+
+and prior (a bit trickier: two columns)
+
+```{r}
+facup_leagues %>% select(-y2020) %>% pivot_longer(starts_with("y"), names_to="year", values_to = "id") %>% 
+  filter(id>0) %>% pull(id) -> lnos
+```
+
+
+
+
+## get old league from soccerway
+
+need to have a round of games from the new season
+
+```{r}
+lnos=c(50939) # last
+lnos_new=c(56641) # this
+games %>% comp_games(lnos_new) 
+```
+
+create name lookup table
+
+```{r}
+name_lookup_table(games, lnos) -> name_lookups
+name_lookups
+```
+
+
+
+## make prior
+
+then fit stan model, then look up team names.
+create prior (starts from comp number and file name to save in)
+
+```{r}
+country_name="norway"
+last_year=2019
+save_name=str_c(country_name, last_year, ".csv")
+save_name
+make_stan_prior_2(games,lnos,save_name,iterations=10000)
+```
+
+
+protocol: save previous ratings in file and hand-edit later
+
+do it now
+
+team changes
+
+```{r}
+team_changes(games, lnos, lnos_new) 
+.Last.value[[2]] %>% unite(team, sw_id:name, sep=",")
+```
+
+
+```{r}
+games %>% comp_games(lnos_new) %>% View("2020 games") 
+```
+
+
+for europe: check that all the teams in this year's games are in the prior. check that prior contains all stan ids.
+
+
+
+
+look up t1/t2 in prior
+
+
+
+```{r}
+pr=read_csv("europe2020_prior.csv")
+pr
+# make up empty lookup
+lo <- tibble(id=1:728, text="thing")
+pr %>% select(id, name) -> pr2
+lo %>% left_join(pr2) %>% filter(is.na(name))
+
+games %>% comp_games(lnos_new) %>% 
+  left_join(pr, by=c("t2"="sw_id")) %>% 
+  filter(is.na(name)) %>% distinct(t2, t2_name)
+```
+
+
+
+## now edit last year's ratings to be this year's prior, removing the promoted and relegated teams, and replacing them with the ones that went down and up last year.
+
+having replaced up and down names with u and d:
+
+```{r}
+prior_name=str_c(country_name, last_year+1, "_prior.csv")
+prior_name
+pr=read_csv(prior_name)
+pr
+pr %>% filter(str_length(name)==1) %>% 
+  group_by(name) %>% 
+  summarize(m=mean(o+d)/2)
+```
+
+Note: prior gives connection betweem stan id and sw id; make one based on *this* season to get connection with names.
+

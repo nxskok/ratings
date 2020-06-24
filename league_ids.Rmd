@@ -1,0 +1,30 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Add new leagues here
+
+need to worry about leagues that haven't started yet (and thus don't have a last game). Or maybe I don't.
+
+keep track (until prior sorted) of last year's league also (as a comment?)
+
+having at least one vector in id makes it a list-column
+
+```{r}
+library(tidyverse)
+league_ids=tribble(
+  ~the_country, ~id,
+  "Scotland", 53513,
+  "England",  53145,
+  "England_champ", 53782,
+  "France", 53638,
+  "Greece", c(53558, 53559),
+  "Germany", 53499,
+  "Spain", 53502,
+  "Italy", 54890,
+  "Sweden", 56336,
+)
+saveRDS(league_ids, "league_ids.rds")
+```
+

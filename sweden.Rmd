@@ -1,0 +1,364 @@
+---
+title: "sweden"
+output: html_notebook
+---
+
+attempting to do last season's Sweden ratings; not saving anything
+
+
+## packages
+
+```{r}
+library(tidyverse)
+library(rstan)
+```
+
+## get games
+
+```{bash}
+ls -l ~/teaching/scoresway/rds/games.rds
+```
+that's it:
+
+```{r}
+games=readRDS("~/teaching/scoresway/rds/games.rds")
+games
+```
+
+get comp and comp_name. These are the first lines that match.
+
+```{r}
+games %>% select(comp, comp_name, time_stamp, country) %>% 
+  group_by(comp) %>% 
+  summarize(nm=min(comp_name),nt=min(time_stamp),nc=min(country)) %>% 
+  filter(str_detect(nc, "Sweden"), str_detect(nm, "Allsvenskan"))
+```
+
+a function to return all the different leagues matching input country
+
+```{r}
+country_to_leagues=function(games,country) {
+  games %>% select(comp, comp_name, time_stamp, country) %>% 
+    group_by(comp) %>% 
+    summarize(nm=min(comp_name),nt=min(time_stamp),nc=min(country)) %>% 
+    filter(str_detect(nc, country)) %>% pull(nm) %>% unique()
+}
+```
+
+```{r}
+games %>% country_to_leagues("Sweden")
+```
+
+a function to return all the seasons matching country and league name
+
+```{r}
+country_to_league_number=function(games,country,league_name) {
+  games %>% select(comp, comp_name, time_stamp, country) %>% 
+    group_by(comp) %>% 
+    summarize(nm=min(comp_name),nt=min(time_stamp),nc=min(country)) %>% 
+    filter(str_detect(nc, country),str_detect(nm, league_name))
+}
+```
+
+```{r}
+country_to_league_number(games,"Sweden","Allsvenskan")
+```
+
+try another one
+
+```{r}
+country_to_leagues(games,"France")
+country_to_league_number(games,"France","Ligue 1")
+```
+
+```{r}
+comp_games=function(games,comp_number) {
+  games %>% filter(comp==comp_number)
+}
+```
+
+```{r}
+team_lookup_table=function(the_games) { # the_games is output from comp_games 
+  team_names=with(the_games,c(t1_name,t2_name))
+  team_names=sort(unique(team_names))
+  tibble(team=team_names) %>% mutate(id=row_number())
+}
+```
+
+testing
+
+```{r}
+games %>% comp_games(39293) %>% team_lookup_table() # I probably shouldn't do it like this though
+```
+
+better:
+
+```{r}
+(games %>% comp_games(39293) -> gg)
+(gg %>% team_lookup_table() -> lookup_table)
+```
+
+
+get nt=number of teams (as #rows in this) sometime
+
+Look up team names by number
+
+```{r}
+make_stan=function(the_games,lookup_table) {
+  the_games %>% 
+    left_join(lookup_table,by=c("t1_name"="team")) %>% 
+    left_join(lookup_table,by=c("t2_name"="team")) %>% 
+    separate(score,c("s1","s2"),convert=T) %>% 
+    select(t1=id.x, t2=id.y, s1, s2)
+}
+make_stan(gg,lookup_table)
+```
+
+
+```{r}
+make_stan_prior_data=function(games,comp_id) {
+  games %>% comp_games(comp_id) -> gg
+  gg %>% team_lookup_table() -> lookup_table
+  gg_stan=make_stan(gg, lookup_table)
+  with(gg_stan,list(
+    nt=nrow(lookup_table),
+    ng=nrow(gg_stan),
+    x=cbind(t1,t2),
+    y=cbind(s1,s2),
+    prior_o_mean=rep(0,nt),
+    prior_o_sd=rep(1,nt),
+    prior_d_mean=rep(0,nt),
+    prior_d_sd=rep(1,nt),
+    prior_h_mean=0,
+    prior_h_sd=1
+  ))
+}
+games %>% 
+  make_stan_prior_data(39293) ->
+spd
+str(spd)
+```
+
+get the compiled model
+
+```{r}
+(p.sc=readRDS("psc.rds"))
+```
+
+
+
+now run the model
+
+```{r}
+sweden2017=sampling(p.sc,sweden_data)
+sweden2017
+```
+
+extract stuff and get means
+
+```{r}
+rat=extract(sweden2017)
+str(rat)
+tibble(id=1:nt,
+       o=apply(rat$o,2,mean),
+       os=apply(rat$o,2,sd),
+       d=apply(rat$d,2,mean),
+       ds=apply(rat$d,2,sd),
+       h=mean(rat$h),
+       hs=sd(rat$h)
+       ) %>% 
+  left_join(teams) %>% 
+  select(team_names,id,everything()) %>% 
+  write_csv("sweden2017.csv")
+```
+
+make csv of mean and SD of ratings for each team this year (above)
+edit to include promoted teams
+
+
+
+find teams not in it this season
+
+this season is 44851
+
+```{r}
+games %>% 
+  filter(comp==44851) ->
+d
+teams_now=with(d,c(t1_name,t2_name))
+teams_now=sort(unique(teams_now))
+dd=tibble(team_names=teams_now)
+dd %>% anti_join(teams) # teams not in it last year
+teams %>% anti_join(dd) # teams in it last year but not this.
+```
+
+
+make this into a function
+ 
+perhaps start with competition id
+
+## league table
+
+get games
+
+```{r}
+games %>% filter(comp==44851) %>% 
+  filter(str_detect(score," - "))%>% 
+  separate(score,c("s1","s2"),sep=" - ",convert=T) %>%
+  select(t1_name,t2_name,s1,s2) %>% 
+  mutate(result=case_when(
+    s1>s2 ~ "W",
+    s1==s2 ~ "D",
+    s1<s2 ~ "L",
+    TRUE ~ "X"
+  )) %>% 
+  mutate(pt1=case_when(
+    result=="W" ~ 3,
+    result=="D" ~ 1,
+    result=="L" ~ 0
+  )) %>% 
+  mutate(pt2=case_when(
+    result=="W" ~ 0,
+    result=="D" ~ 1,
+    result=="L" ~ 3
+  )) -> 
+d
+d
+```
+
+info for home teams
+
+```{r}
+d %>% group_by(t1_name) %>% 
+  summarize(P=n(),
+            GD=sum(s1)-sum(s2),
+            Pt=sum(pt1)
+            ) -> 
+tab1
+d %>% group_by(t2_name) %>% 
+  summarize(P=n(),
+            GD=sum(s2)-sum(s1),
+            Pt=sum(pt2)
+            ) -> 
+tab2
+tab1 %>% left_join(tab2,by=c("t1_name"="t2_name")) %>% 
+  mutate(P=P.x+P.y,GD=GD.x+GD.y,Pt=Pt.x+Pt.y) %>% 
+  select(t1_name,P,GD,Pt) %>% 
+  arrange(desc(Pt),desc(GD))
+```
+
+function to make league table from comp number
+
+```{r}
+table_of=function(games,lg_number) {
+  games %>% 
+    filter(comp==lg_number) %>% 
+  filter(str_detect(score," - "))%>% 
+  separate(score,c("s1","s2"),sep=" - ",convert=T) %>%
+  select(t1_name,t2_name,s1,s2) %>% 
+  mutate(result=case_when(
+    s1>s2 ~ "W",
+    s1==s2 ~ "D",
+    s1<s2 ~ "L",
+    TRUE ~ "X"
+  )) %>% 
+  mutate(pt1=case_when(
+    result=="W" ~ 3,
+    result=="D" ~ 1,
+    result=="L" ~ 0
+  )) %>% 
+  mutate(pt2=case_when(
+    result=="W" ~ 0,
+    result=="D" ~ 1,
+    result=="L" ~ 3
+  )) -> 
+d
+d %>% group_by(t1_name) %>% 
+  summarize(P=n(),
+            GD=sum(s1)-sum(s2),
+            Pt=sum(pt1)
+            ) -> 
+tab1
+d %>% group_by(t2_name) %>% 
+  summarize(P=n(),
+            GD=sum(s2)-sum(s1),
+            Pt=sum(pt2)
+            ) -> 
+tab2
+tab1 %>% left_join(tab2,by=c("t1_name"="t2_name")) %>% 
+  mutate(P=P.x+P.y,GD=GD.x+GD.y,Pt=Pt.x+Pt.y) %>% 
+  select(t1_name,P,GD,Pt) %>% 
+  arrange(desc(Pt),desc(GD))
+}
+```
+
+test it
+
+```{r}
+table_of(games,39292)
+```
+
+hand-edited last year's ratings to make priors for this year. Now use as priors, doubling the SDs
+
+```{r}
+sweden_prior=read_csv("sweden2018_prior.csv")
+sweden_prior
+```
+
+## construct data list
+
+results with team numbers
+
+```{r}
+games %>% filter(comp==44851) %>% 
+  filter(str_detect(score," - "))%>% 
+  separate(score,c("s1","s2"),sep=" - ",convert=T) %>% 
+  select(t1_name,t2_name,s1,s2) %>% 
+  left_join(sweden_prior,by=c("t1_name"="team_names")) %>% 
+  left_join(sweden_prior,by=c("t2_name"="team_names")) %>% 
+  select(t1=id.x,t2=id.y,s1,s2) ->
+sweden_stan
+```
+
+now make list
+
+```{r}
+sweden_data=with(sweden_stan,list(
+  nt=nrow(sweden_prior),
+  ng=nrow(sweden_stan),
+  x=cbind(t1,t2),
+  y=cbind(s1,s2),
+  prior_o_mean=sweden_prior$o,
+  prior_o_sd=2*sweden_prior$os,
+  prior_d_mean=sweden_prior$d,
+  prior_d_sd=2*sweden_prior$ds,
+  prior_h_mean=sweden_prior$h[1],
+  prior_h_sd=sweden_prior$hs[1]
+))
+str(sweden_data)
+p.sc=readRDS("psc.rds")
+p.sc
+```
+
+```{r}
+sweden_now=sampling(p.sc,data=sweden_data)
+```
+
+```{r}
+sweden_now
+```
+
+```{r}
+rat=extract(sweden_now)
+str(rat)
+tibble(id=1:nrow(sweden_prior),
+       o=apply(rat$o,2,mean),
+       d=apply(rat$d,2,mean),
+       h=mean(rat$h)
+       ) %>% 
+  left_join(sweden_prior,by=c("id")) %>% 
+  select(team_names,id,o=o.x,d=d.x) %>% 
+  mutate(sum=o+d,diff=o-d) %>% 
+  arrange(desc(sum))
+```
+

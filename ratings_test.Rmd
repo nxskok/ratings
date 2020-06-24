@@ -1,0 +1,97 @@
+---
+title: "ratings test"
+output: html_notebook
+---
+
+## packages
+
+```{r}
+library(tidyverse)
+library(rstan)
+```
+
+## compile model
+
+```{r}
+p.sc=stan_model("model.stan")
+```
+
+did it compile?
+
+```{r}
+p.sc
+```
+
+## some made-up data
+
+```{r}
+d=tribble(
+  ~t1, ~t2, ~s1, ~s2,
+  1, 2, 3, 1,
+  2, 3, 1, 1,
+  3, 1, 1, 2
+)
+d
+```
+
+collect up into a data list
+
+```{r}
+data_list=with(d,list(
+  ng=3,
+  nt=3,
+  x=cbind(as.integer(t1),as.integer(t2)),
+  y=cbind(as.integer(s1),as.integer(s2)),
+  prior_o_mean=c(0,0,0),
+  prior_o_sd=c(1,1,1),
+  prior_d_mean=c(0,0,0),
+  prior_d_sd=c(1,1,1),
+  prior_h_mean=0,
+  prior_h_sd=1
+))
+data_list
+str(data_list)
+```
+
+## fit model
+
+```{r}
+fit.1=sampling(p.sc,data_list)
+fit.1
+```
+
+now use this as prior for a repeat estimation with the same results (not realistic I know, but...)
+
+```{r}
+data_list=with(d,list(
+  ng=3,
+  nt=3,
+  x=cbind(as.integer(t1),as.integer(t2)),
+  y=cbind(as.integer(s1),as.integer(s2)),
+  prior_o_mean=c(0.50,-0.17,-0.28),
+  prior_o_sd=c(0.62,0.67,0.68),
+  prior_d_mean=c(0.08,-0.18,0.08),
+  prior_d_sd=c(0.67,0.66,0.62),
+  prior_h_mean=0.12,
+  prior_h_sd=0.56
+))
+data_list
+str(data_list)
+
+```
+
+fit again
+
+```{r}
+fit.2=sampling(p.sc,data_list)
+fit.2
+```
+
+extract
+
+```{r}
+ans=extract(fit.2,"o")
+ans
+apply(ans$o,2,"mean")
+```
+
