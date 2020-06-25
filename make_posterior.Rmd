@@ -17,7 +17,7 @@ source("functions.R")
 ## get games and league IDs
 
 ```{r}
-games=readRDS("~/teaching/scoresway/rds/games.rds")
+games=readRDS("~/Documents/r-projects/scoresway/rds/games.rds")
 league_ids=readRDS("league_ids.rds")
 league_ids
 ```
@@ -32,7 +32,7 @@ league_ids %>% arrange(the_country) %>% mutate(row=row_number()) %>% select(the_
 ## enter number of desired country below
 
 ```{r league-no}
-cno=31
+cno=6
 prior_year=2020
 li %>% slice(cno) -> v
 v %>% unnest(id)

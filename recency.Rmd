@@ -17,7 +17,7 @@ source("recency_functions.R")
 get games and league IDs
 
 ```{r}
-games=readRDS("~/teaching/scoresway/rds/games.rds")
+games=readRDS("~/Documents/r-projects/scoresway/rds/games.rds")
 (league_ids=readRDS("league_ids.rds"))
 ```
 
